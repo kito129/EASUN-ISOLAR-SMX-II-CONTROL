@@ -1,153 +1,159 @@
-let net = require('net');
-let fs = require('fs');
-let dgram = require('dgram');
-var localIpV4Address = require("local-ipv4-address");
-const { exit } = require('process');
-const { Buffer } = require('buffer');
+import net from 'net'
+import fs from 'fs'
+import dgram from 'dgram'
+import localIpV4Address from 'local-ipv4-address'
+import {exit} from 'process';
+import { Buffer } from 'buffer'
 
+import Logger from './logger.js' // Import the Logger class
 
-function runscript(args) {
+const buffer = Buffer.alloc(4)
+const logger = new Logger()
 
-    var commands={};
-    let cdata=fs.readFileSync('commands.json',{encoding:'utf8', flag:'r'});
+function runScript(args) {
+
+    let commands={}
+    let cdata=fs.readFileSync('commands-simple.json',{encoding:'utf8', flag:'r'})
 
     try{ 
-        commands=JSON.parse(cdata);
+        commands=JSON.parse(cdata)
     }catch(e){
-        console.log(e);
+        logger.log(e)
     }
 
-    console.log("!!! 0. Please connect to the datalogger wifi access point or ensure the device is accessible on your network !!!");
-    console.log("!!! On initial setup the datalogger ip address is the gateway (obtained by dhcp from the datalogger wifi AP) !!!");
-    console.log("!!! Provide custom local ip if the machine that you are running this script from is available on a custom route not on the default one (vpn setup) !!!");
+    logger.log("!!! 0. Please connect to the data-logger wifi access point or ensure the device is accessible on your network !!!")
+    logger.log("!!! On initial setup the data-logger ip address is the gateway (obtained by dhcp from the data-logger wifi AP) !!!")
+    logger.log("!!! Provide custom local ip if the machine that you are running this script from is available on a custom route not on the default one (vpn setup) !!!")
 
-    console.log("Quick examples:\n Query all inverter parameters: npm start get-smx-param [datalogger ip address]");
-    console.log(" Set output priority(parameter 1) to SOL: npm start set-smx-param [datalogger ip address] 1 SOL ");
+    logger.log("Quick examples:\n Query all inverter parameters: npm start get-smx-param [data-logger ip address]")
+    logger.log(" Set output priority(parameter 1) to SOL: npm start set-smx-param [data-logger ip address] 1 SOL ")
 
-    let customip="";
-    let original_argv=args.slice();
+    let customIp=""
+    let original_argv=args.slice()
     
     args.forEach(function(el, index, object){
-        //console.log(el);
-        let m=el.match(/^localip=((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$/);
+        //logger.log(el)
+        let m=el.match(/^localip=((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$/)
         if (m) {
-            //if localip is provided before command -> error
-            if (index==2) {
-                console.log('Argument error: No COMMAND provided!');
-                console.log("\nUSAGE: COMMAND [options] [localip=192.168.89.255]\n\nCOMMANDS:")
+            //if localIp is provided before command -> error
+            if (index===2) {
+                logger.log('Argument error: No COMMAND provided!')
+                logger.log("\nUSAGE: COMMAND [options] [localip=192.168.89.255]\n\nCOMMANDS:")
                 commands.commandsequences.forEach(function(cs){
-                    console.log(cs.name+" "+cs.args+" \n ("+cs.desc+")\n");
-                });
-                exit(-1);
+                    logger.log(cs.name+" "+cs.args+" \n ("+cs.desc+")\n")
+                })
+                exit(-1)
             }
-            customip=el.substring(8);
-            console.log("")
-            object.splice(index,1);
+            customIp=el.substring(8)
+            logger.log("")
+            object.splice(index,1)
         }
-    });
+    })
     
-    var myargs = args.slice(2);
+    let myArgs = args.slice(2)
 
-    console.log("\nUSAGE: COMMAND [options] [localip=192.168.89.255]\n\nCOMMANDS:")
+    logger.log("\nUSAGE: COMMAND [options] [localip=192.168.89.255]\n\nCOMMANDS:")
     commands.commandsequences.forEach(function(cs){
-        console.log(cs.name+" "+cs.args+" \n ("+cs.desc+")\n");
-    });
+        logger.log(cs.name+" "+cs.args+" \n ("+cs.desc+")\n")
+    })
 
-    console.log("\n");
+    logger.log("\n")
 
-    var global_commandsequence=""; //run more commands after another
-    var global_commandparam=""; //run more parameters for 1 command
-    var grouped_commandparam=""; //run 1 query for multiple parameters
-    var global_tcp_seq=1; //sends the device in every command: modbus transaction id
+    let global_commandsequence="" //run more commands after another
+    let globalCommandParam="" //run more parameters for 1 command
+    let groupedCommandParam="" //run 1 query for multiple parameters
+    let global_tcp_seq=1 //sends the device in every command: modbus transaction id
 
-    if (myargs.length==0){
-        console.log("\n No command supplied! ");
+    let argscount=[]
+
+    if (myArgs.length==0){
+        logger.log("\n No command supplied! ")
     }else{
 
         commands.commandsequences.forEach(function(cs){
             
-            if (cs.name===myargs[0]){
+            if (cs.name===myArgs[0]){
                 
-                global_commandsequence=myargs[0];
-                console.log("Running: "+global_commandsequence);
+                global_commandsequence=myArgs[0]
+                logger.log("Running: "+global_commandsequence)
 
-                argscount=[];
+                argscount=[]
                 cs.seq.forEach(function(cd){
-                    let nc=commands.commands.find(cdf => cdf.name === cd);
+                    let nc=commands.commands.find(cdf => cdf.name === cd)
                     
-                    let reg=nc.cmd.match(/\{ARG[PV]*[0-9]+\}/g);
-                    if (reg!=null && reg!==false && reg!=undefined ) argscount=argscount.concat(reg);
+                    let reg=nc.cmd.match(/\{ARG[PV]*[0-9]+\}/g)
+                    if (reg!=null && reg!==false && reg!==undefined ) argscount=argscount.concat(reg)
 
-                    //console.log(nc);
+                    //logger.log(nc)
                     if (nc.hasOwnProperty('definition') && Array.isArray(nc.definition)) {
-                        //exit(0);
+                        //exit(0)
                         
                         //optional last argumentum (start param to query)
-                        let lastarg=myargs[myargs.length-1];
-                        let ind=nc.definition.findIndex(o => o.num == lastarg );
+                        let lastArg=myArgs[myArgs.length-1]
+                        let ind=nc.definition.findIndex(o => o.num === lastArg )
 
-                        global_commandparam=(lastarg.match(/^[0-9]+$/) && ind>0 ?ind:0);
+                        globalCommandParam=(lastArg.match(/^[0-9]+$/) && ind>0 ?ind:0)
 
-                        console.log("Starting from param: ",global_commandparam);
+                        logger.log("Starting from param: ",globalCommandParam)
 
                         //check addresses to join to query together
-                        let addrord=[];
+                        let addrord=[]
                         nc.definition.forEach(function(el,ind){
                             
-                            if (ind>=global_commandparam){
+                            if (ind>=globalCommandParam){
 
-                                let addr=parseInt(el.address, 16);
+                                let addr=parseInt(el.address, 16)
                                 
-                                addrord.push({'index': ind,'address':addr, 'name': el.name,'type': (Number.isInteger(el.type)?el.type:1)});
+                                addrord.push({'index': ind,'address':addr, 'name': el.name,'type': (Number.isInteger(el.type)?el.type:1)})
                                 
                             }
-                        });
+                        })
 
-                        addrord.sort(function(a,b){ return a.address-b.address });
+                        addrord.sort(function(a,b){ return a.address-b.address })
 
-                        let bymem=[];
-                        let lv=0;
+                        let bymem=[]
+                        let lv=0
 
                         addrord.forEach(function(el, ind){
-                            if (bymem.length==0){
-                                bymem.push([el]);
+                            if (bymem.length===0){
+                                bymem.push([el])
                             }else{
 
                                 if (bymem[lv][0].address+123>(el.address+(Number.isInteger(el.type)?el.type:1))){
-                                    bymem[lv].push(el);
+                                    bymem[lv].push(el)
                                 }else{
-                                    bymem.push([el]);
-                                    lv++;
+                                    bymem.push([el])
+                                    lv++
                                 }
 
                             }
-                        });
+                        })
                         
 
-                        //console.log("sortedaddrs:", bymem);
+                        //logger.log("sortedaddrs:", bymem)
                         
                     }
                     
-                });
+                })
             
-                var arguniq=argscount.filter((v, i, a) => a.indexOf(v) === i);
+                let arguniq=argscount.filter((v, i, a) => a.indexOf(v) === i)
                 
-                if (myargs.length<arguniq.length+2) {
-                    console.log("Wrong number of arguments! Exiting...");
-                    exit(-1);
+                if (myArgs.length<arguniq.length+2) {
+                    logger.log("Wrong number of arguments! Exiting...")
+                    exit(-1)
                 }
 
-                //default 4 min timeout to prevent stucking node if not error event occures in tcp communication but no answer recived
+                //default 4 min timeout to prevent stucking node if not error event occurs in tcp communication but no answer received
                 setTimeout(function() {
-                    console.log("Timeout occured...exiting!");
-                    exit(-1);
-                }, (1000*60*4));
+                    logger.log("Timeout occurred...exiting!")
+                    exit(-1)
+                }, (1000*60*4))
 
-                sendudp(myargs[1]);
+                sendudp(myArgs[1])
 
             }
 
-        });
+        })
 
     }
 
@@ -158,119 +164,121 @@ function runscript(args) {
 
             localIpV4Address().then(function(ip){
             
-                if (customip!=""){
-                    ip=customip;
+                if (customIp!==""){
+                    ip=customIp
                 }
                 
-                console.log("Using local ip to create TCP server: "+(ip));
+                logger.log("Using local ip to create TCP server: "+(ip))
 
-                starttcp();
+                startTcp()
 
-                var client = dgram.createSocket('udp4');
-                let port=58899;
-                let command="set>server="+ip+":8899;";
+                let client = dgram.createSocket('udp4')
+                let port=58899
+                let command="set>server="+ip+":8899"
                 
-                console.log("Sending UDP packet(port: "+port+") to inform datalogger device to connect the TCP server:");
-                console.log(command);
+                logger.log("Sending UDP packet(port: "+port+") to inform data-logger device to connect the TCP server:")
+                logger.log(command)
 
                 client.on('listening', function () {
-                    var address = client.address();
-                    console.log('UDP server listening on ' + address.address + ":" + address.port);
-                });
+                    let address = client.address()
+                    logger.log('UDP server listening on ' + address.address + ":" + address.port)
+                })
 
                 client.on('error', (err) => {
-                    console.log(`UDP server error:\n${err.stack}`);
-                    client.close();
-                });
+                    logger.log(`UDP server error:\n${err.stack}`)
+                    client.close()
+                })
 
                 client.on('message',function(message, remote){
-                    console.log(remote.address + ':' + remote.port +' - ' + message);
-                    console.log("Got answer, closing UDP socket...");
-                    client.close();
-                });
+                    logger.log(remote.address + ':' + remote.port +' - ' + message)
+                    logger.log("Got answer, closing UDP socket...")
+                    client.close()
+                })
 
-                client.send(command,0, command.length, port, devip);
+                client.send(command,0, command.length, port, devip)
 
-            });
+            })
 
         }catch(e){
-            console.log("Error: ",e);
-            exit(-1);
+            logger.log("Error: ",e)
+            exit(-1)
         }
         
     }
 
-    function starttcp(){
+    function startTcp(){
 
-        let port=8899;
-        let command_seq=0;
+        let port=8899
+        let command_seq=0
 
-        console.log("starting TCP server(port: "+port+") to recieve data....");
+        logger.log("starting TCP server(port: "+port+") to receive data....")
 
-        var server = net.createServer(function(socket) {
+        let server = net.createServer(function(socket) {
 
-            console.log(`${socket.remoteAddress}:${socket.remotePort} connected on TCP`);
+            logger.log(`${socket.remoteAddress}:${socket.remotePort} connected on TCP`)
             
-            let outsum="\n";
-            let outobj={};
+            let outSum="\n"
+            let outObj={}
+            let startPos = 0
+            let lenValue = 0
 
-            //socket.pipe(socket);
+            //socket.pipe(socket)
             socket.on('data',function(data){
-                //console.log("Got TCP packet...");
-                //dumpdata(data);
-                //console.log("Binary: ",data.toString());
-                //console.log("\n");
+                //logger.log("Got TCP packet...")
+                //dumpdata(data)
+                //logger.log("Binary: ",data.toString())
+                //logger.log("\n")
 
-                let lastcmdname=getcommseqcmd(command_seq-1);
-                //console.log(lastcmdname);
-                let lastcmddef = commands.commands.find(e => e.name === lastcmdname);
-                //console.log(lastcmddef);
-                if (global_commandparam!=="" && lastcmddef!==undefined && lastcmddef!==null && lastcmddef.hasOwnProperty('definition')){
-                    
-                    let handled=[];
-                    lastcmddef.definition.forEach(function(def,ind){
+                let lastCmdName=getCommSeqCmd(command_seq-1)
+                //logger.log(lastcmdname)
+                let lastCmdDef = commands.commands.find(e => e.name === lastCmdName)
+                //logger.log(lastcmddef)
+                if (globalCommandParam!=="" && lastCmdDef!==undefined && lastCmdDef!==null && lastCmdDef.hasOwnProperty('definition')){
 
-                        if (global_commandparam!=="") {
-                            if (ind!=global_commandparam) {
-                                return ;
+                    let handled=[]
+                    lastCmdDef.definition.forEach(function(def,ind){
+
+                        if (globalCommandParam!=="") {
+                            if (ind!==globalCommandParam) {
+                                return
                             }
                         } else {
-                            
-                            return;
+
+                            return
                         }
 
                         //modbus rtu response: fixed position to extract data from
-                        let val="";
-                        val=data.toString('hex');
+                        let val=""
+                        val=data.toString('hex')
 
-                        process.stdout.write("Response orig:\n");
-                        dumpdata(data);
+                        process.stdout.write("Response orig:\n")
+                        dumpData(data)
 
                         //data starts at byte 11
-                        startpos=11;
+                        startPos=11
 
                         //1 byte len
-                        lenval=data[10];
-                        
-                        let tmpbuf=data.slice(8,data.length-2);
-                        let rcrc=data.slice(data.length-2,data.length);
-                        //dumpdata(rcrc);
-                        rcrc=rcrc.readUInt16BE().toString(16).padStart(4,'0');
-                        //dumpdata(tmpbuf);
-                        let chcrc=crc16modbus(tmpbuf);
-                        chcrc=chcrc.toString(16).padStart(4,'0');
-        
-                        let hcrc=chcrc.substring(2)+chcrc.substring(0,2);
-                        
-                        console.log("(Response info len: "+lenval+" Data type: "+def.type+" "+"CRC check: "+hcrc+" "+rcrc+")");
+                        startPos=data[10]
 
-                        if (hcrc!=rcrc){
+                        let tmpBuffer=data.slice(8,data.length-2)
+                        let rcrc=data.slice(data.length-2,data.length)
+                        //dumpdata(rcrc)
+                        rcrc=rcrc.readUInt16BE().toString(16).padStart(4,'0')
+                        //dumpdata(tmpbuf)
+                        let chcrc=crc16modbus(tmpBuffer)
+                        chcrc=chcrc.toString(16).padStart(4,'0')
 
-                            let outt=(def.hasOwnProperty('num')?def.num.padStart(2,'0')+" ":"")+def.name+":\t \t NA : ERROR IN RESPONSE!";
-                            console.log(outt);
+                        let hcrc=chcrc.substring(2)+chcrc.substring(0,2)
 
-                            outobj[def.name]="N/A";
-                            outsum+=outt+"\n";
+                        logger.log("(Response info len: "+lenValue+" Data type: "+def.type+" "+"CRC check: "+hcrc+" "+rcrc+")")
+
+                        if (hcrc!==rcrc){
+
+                            let outt=(def.hasOwnProperty('num')?def.num.padStart(2,'0')+" ":"")+def.name+":\t \t NA : ERROR IN RESPONSE!"
+                            logger.log(outt)
+
+                            outObj[def.name]="N/A"
+                            outSum+=outt+"\n"
 
                         }else{
 
@@ -278,114 +286,116 @@ function runscript(args) {
                             if ( Number.isInteger(def.type) ){
 
                                 //type with custom length: not needed -> string default
-                                //val=val.substring(startpos*2,startpos*2+(lenval*2));
+                                //val=val.substring(startpos*2,startpos*2+(lenval*2))
 
-                                for(let c=0;c<lenval*2;c++){
-                                    handled[startpos*2+c]=1;
+                                for(let c=0;c<lenValue*2;c++){
+                                    handled[startPos*2+c]=1;
                                 }
-                                
+
                                 //default handle as string
-                                let nb=data.slice(startpos,startpos+lenval);
-                                nb=nb.toString('utf8').replace(/\0/g, '');
+                                let nb=data.slice(startPos,startPos+lenValue)
+                                nb=nb.toString('utf8').replace(/\0/g, '')
 
                                 if (def.hasOwnProperty('format')){
                                     //datetime
                                     if (def.format===100){
-                                        nb= "20"+data.readUInt8(startpos+lenval-6).toString()+"-"+
-                                            data.readUInt8(startpos+lenval-5).toString()+"-"+
-                                            data.readUInt8(startpos+lenval-4).toString()+" "+
-                                            data.readUInt8(startpos+lenval-3).toString().padStart(2,'0')+":"+
-                                            data.readUInt8(startpos+lenval-2).toString().padStart(2,'0')+":"+
-                                            data.readUInt8(startpos+lenval-1).toString().padStart(2,'0');
+                                        nb= "20"+data.readUInt8(startPos+lenValue-6).toString()+"-"+
+                                            data.readUInt8(startPos+lenValue-5).toString()+"-"+
+                                            data.readUInt8(startPos+lenValue-4).toString()+" "+
+                                            data.readUInt8(startPos+lenValue-3).toString().padStart(2,'0')+":"+
+                                            data.readUInt8(startPos+lenValue-2).toString().padStart(2,'0')+":"+
+                                            data.readUInt8(startPos+lenValue-1).toString().padStart(2,'0')
                                     }
                                     //fault codes
                                     if (def.format===101){
-                                        nb = "FAULT0: "+data.readUInt16BE(startpos)+": "+def.unit[data.readUInt16BE(startpos)]+" "+
-                                            "FAULT1: "+data.readUInt16BE(startpos+2)+": "+def.unit[data.readUInt16BE(startpos+2)]+" "+
-                                            "FAULT2: "+data.readUInt16BE(startpos+4)+": "+def.unit[data.readUInt16BE(startpos+4)]+" "+
-                                            "FAULT3: "+data.readUInt16BE(startpos+6)+": "+def.unit[data.readUInt16BE(startpos+6)]+" ";
-                                            
+                                        nb = "FAULT0: "+data.readUInt16BE(startPos)+": "+def.unit[data.readUInt16BE(startPos)]+" "+
+                                            "FAULT1: "+data.readUInt16BE(startPos+2)+": "+def.unit[data.readUInt16BE(startPos+2)]+" "+
+                                            "FAULT2: "+data.readUInt16BE(startPos+4)+": "+def.unit[data.readUInt16BE(startPos+4)]+" "+
+                                            "FAULT3: "+data.readUInt16BE(startPos+6)+": "+def.unit[data.readUInt16BE(startPos+6)]+" "
+
                                     }
                                 }
-                                
-                                val=nb;
-                            
+
+                                val=nb
+
                             }else{
 
                                 //basic types supported by Buffer class: most seem to be 2 bytes long
-                                val=data['read'+def.type](startpos);
+                                val=data['read'+def.type](startPos)
 
                                 //hack: mark always 2 bytes: just for debugging
-                                handled[startpos*2]=1;
-                                handled[startpos*2+1]=1;
-                                handled[startpos*2+2]=1;
-                                handled[startpos*2+3]=1;
+                                handled[startPos*2]=1
+                                handled[startPos*2+1]=1
+                                handled[startPos*2+2]=1
+                                handled[startPos*2+3]=1
 
                                 if (def.hasOwnProperty('rate')){
-                                    val=val*def.rate;
+                                    val=val*def.rate
                                 }
-                                
+
                                 if (def.hasOwnProperty('format')){
-                                    val=val.toFixed(def.format);
+                                    val=val.toFixed(def.format)
                                 }
-                                
+
                             }
 
-                            let stmp=(def.hasOwnProperty('num')?def.num.padStart(2,'0')+" ":"")+def.name+":\t \t "+val+" "+(Array.isArray(def.unit)?( def.unit[parseInt(val)]!==undefined? (" => "+def.unit[parseInt(val)]): '' ):def.unit);
-                            console.log(stmp);
-                            outobj[def.name]=parseFloat(val);
+                            let stmp=(def.hasOwnProperty('num')?def.num.padStart(2,'0')+" ":"")+def.name+":\t \t "+val+" "+(Array.isArray(def.unit)?( def.unit[parseInt(val)]!==undefined? (" => "+def.unit[parseInt(val)]): '' ):def.unit)
+                            logger.log(stmp)
+                            outObj[def.name]=parseFloat(val)
                             if (Array.isArray(def.unit) && def.unit[parseInt(val)]!==undefined ) {
-                                outobj[def.name+"_text"]=def.unit[parseInt(val)];
+                                outObj[def.name+"_text"]=def.unit[parseInt(val)]
                             }
-                            outsum+=stmp+"\n";
-                            
-                        }    
+                            outSum+=stmp+"\n"
 
-                        process.stdout.write("Response:\n");
-                        dumpdata(data,handled);
-                        
-                    });
+                        }
 
-                    if (global_commandparam!=="" && lastcmddef.definition.length>global_commandparam+1){
-                        global_commandparam++;
+                        process.stdout.write("Response:\n")
+                        dumpData(data,handled)
+
+                    })
+
+                    if (globalCommandParam!=="" && lastCmdDef.definition.length>globalCommandParam+1){
+                        globalCommandParam++
                         //run again with another param
-                        command_seq--;
+                        command_seq--
                     }
                 }else{
-                    process.stdout.write("Response:\n");
+                    process.stdout.write("Response:\n")
 
-                    dumpdata(data);
+                    dumpData(data)
 
-                    console.log("String format:\n",data.toString());
+                    logger.log("String format:\n",data.toString())
                 }
 
-                let cmdstr=getcommseqcmd(command_seq);
+                let cmdstr=getCommSeqCmd(command_seq)
                 
                 if (cmdstr === undefined) { 
-                    console.log(outsum);
+                    logger.log(outSum)
                     
-                    if (Object.keys(outobj).length === 0 && outobj.constructor === Object) {
-                        console.log("JSON output:\n",outobj);
+                    if (Object.keys(outObj).length === 0 && outObj.constructor === Object) {
+                        logger.log("JSON output:\n",outObj)
                         try {
-                            fs.writeFileSync('currentdata.json',JSON.stringify(outobj));
+                            fs.writeFileSync('currentdata.json',JSON.stringify(outObj))
                         } catch (err) {
                             console.error(err)
                         }
                     }    
-                    
-                    console.log("DONE, exiting"); 
-                    exit(0);
+
+                    // logger.saveToFile(generateFileName())
+                    logger.log("DONE, exiting")
+                
+                    exit(0)
                 }
                 
-                socket.write(getdatacmd(cmdstr));
-                command_seq++;
+                socket.write(getdatacmd(cmdstr))
+                command_seq++
                 
-            });
+            })
 
             socket.on('error',function(error){
-                console.error(`${socket.remoteAddress}:${socket.remotePort} Connection Error ${error}..., exiting...`);
-                exit(-1);
-            });
+                console.error(`${socket.remoteAddress}:${socket.remotePort} Connection Error ${error}..., exiting...`)
+                exit(-1)
+            })
 
             socket.on('close',function(){
 
@@ -394,297 +404,302 @@ function runscript(args) {
 
                 /*
                 process.on("exit", function () {
-                    console.log("process.onexit");
+                    logger.log("process.onexit")
                     //hardcoded restart command
-                    process.argv[2]="restart-wifi";
+                    process.argv[2]="restart-wifi"
                     require("child_process").spawn(process.argv.shift(),process.argv, {
                         cwd: process.cwd(),
                         detached : true,
                         stdio: "inherit"
-                    });
-                });
+                    })
+                })
                 */
 
-                console.log(`${socket.remoteAddress}:${socket.remotePort} Connection closed, exiting and trying to restart datalogger adapter...`);
-                console.log("\n");
+                logger.log(`${socket.remoteAddress}:${socket.remotePort} Connection closed, exiting and trying to restart datalogger adapter...`)
+                logger.log("\n")
 
                 //close tcp server
-                server.close();
+                server.close()
 
-                original_argv[2]="restart-wifi";
-                runscript(original_argv);
+                original_argv[2]="restart-wifi"
+                runScript(original_argv)
                 
-            });
+            })
 
-            let cmdstr=getcommseqcmd(command_seq);
-            if (cmdstr === undefined) { console.log("Missing command sequence, exiting..."); exit(-1); }
+            let commandString=getCommSeqCmd(command_seq)
+            if (commandString === undefined) { logger.log("Missing command sequence, exiting...")
+                exit(-1) }
+
 
             
-            let tw=getdatacmd(cmdstr);
-            //console.log("write:",tw);
-            socket.write(tw);
-            command_seq++;
+            let tw=getdatacmd(commandString)
+            //logger.log("write:",tw)
+            socket.write(tw)
+            command_seq++
 
-        });
+        })
 
-        server.listen(port, '0.0.0.0');
+        server.listen(port, '0.0.0.0')
 
     }
 
 
     //get next command for the commany sequence by index
-    function getcommseqcmd(index){
+    function getCommSeqCmd(index){
 
-        let obj=commands.commandsequences.find(o => o.name === global_commandsequence );
-        return obj.seq[index];
+        let obj=commands.commandsequences.find(o => o.name === global_commandsequence )
+        return obj.seq[index]
     }
 
     function getdatacmd(data){
 
-        console.log("\nCommand: "+data);
+        logger.log("\nCommand: "+data)
 
-        let obj=commands.commands.find(o => o.name === data );
+        let obj=commands.commands.find(o => o.name === data )
         //definition array link following
         if (typeof obj.definition === 'string'){
-            obj.definition=commands.commands.find(o => o.name === obj.definition ).definition;
+            obj.definition=commands.commands.find(o => o.name === obj.definition ).definition
         }
 
-        let cmdtorun=obj.cmd;
+        let cmdtorun=obj.cmd
         //place simple input args in modbus commands
-        let i=0;
-        myargs.forEach(function(el){
+        let i=0
+        myArgs.forEach(function(el){
 
-            let hext=Buffer.from(el, 'utf8').toString('hex');
+            let hext=Buffer.from(el, 'utf8').toString('hex')
             if (obj.hasOwnProperty('raw') && obj.raw===true){
-                hext=el;
+                hext=el
             }
-            cmdtorun=obj.cmd.replace('{ARG'+i+'}',hext);
-            i++;
-        });
+            cmdtorun=obj.cmd.replace('{ARG'+i+'}',hext)
+            i++
+        })
 
         //custom built modbus command
-        cmdtorun=handle_modbus_command(cmdtorun,obj);
+        cmdtorun=handleModbusCommand(cmdtorun,obj)
 
         //compute and place length where needed
-        let matches=cmdtorun.match(/\{LEN\}(.+)$/);
+        let matches=cmdtorun.match(/\{LEN\}(.+)$/)
         if (matches) {
-            cmdtorun=cmdtorun.replace("{LEN}",(matches[1].length/2).toString(16).padStart(4, '0'));
+            cmdtorun=cmdtorun.replace("{LEN}",(matches[1].length/2).toString(16).padStart(4, '0'))
         }
 
         //add modbus tcp transaction id, just an incemental index
-        cmdtorun=cmdtorun.replace('{SEQ}',String(global_tcp_seq).padStart(4, '0'));
-        global_tcp_seq++;
+        cmdtorun=cmdtorun.replace('{SEQ}',String(global_tcp_seq).padStart(4, '0'))
+        global_tcp_seq++
 
-        process.stdout.write("Request: ");
-        dumpdata(cmdtorun);
+        process.stdout.write("Request: ")
+        dumpData(cmdtorun)
         
 
-        return Buffer.from(cmdtorun, 'hex');
+        return Buffer.from(cmdtorun, 'hex')
     }
 
     function getparam(cmd,ind){
 
-        let param=cmd.definition.find(o => o.num === ind );
+        let param=cmd.definition.find(o => o.num === ind )
         if (param!==undefined) {
-            console.log("Requested param: "+param.name);
-            return param;
+            logger.log("Requested param: "+param.name)
+            return param
         }
-        return "";    
+        return ""
     }
 
     //hex dump with color highlighted terminal output
-    function dumpdata(data,handled=null){
+    function dumpData(data,handled=null){
 
-        let strdata=data.toString('hex');
+        let stringData=data.toString('hex')
         
-        let out="";
-        let i=1;
-        [...strdata].forEach(element => {
+        let out=""
+        let i=1
+        let bgred=""
+        let normal=""
+        let exp = [...stringData]
+        exp.forEach(element => {
             
-            bgred="\x1b[42m";
-            normal="\x1b[0m";
+            bgred="\x1b[42m"
+            normal="\x1b[0m"
 
             if (Array.isArray(handled)){
                 if (handled[i-1]==1) {
-                    out+=bgred;
+                    out+=bgred
                 }    
             }
-            out+=element;
+            out+=element
             if (Array.isArray(handled)){
-                if (handled[i-1]==1) {
-                    out+=normal;
+                if (handled[i-1]===1) {
+                    out+=normal
                 }
             }    
 
-            if (i%2==0) {     
-                out+=" ";
+            if (i%2===0) {
+                out+=" "
             }
 
-            if (i%16==0) {
-                out+="  ";
+            if (i%16===0) {
+                out+="  "
             }
 
-            if (i%32==0) {
-                out+="\n";
+            if (i%32===0) {
+                out+="\n"
             }
 
-            i++;
+            i++
 
-        });
+        })
 
-        console.log(out);
+        logger.log(out)
 
     }
 
-    function handle_modbus_command(command,cmd) {
+    function handleModbusCommand(command,cmd) {
 
-        if (!command.match(/{CRC}/)) return command;
+        if (!command.match(/{CRC}/)) return command
     
-        let addr = "";
-        let type = "";
+        let addr = ""
+        let type = ""
 
-        if (global_commandparam!==""){
+        if (globalCommandParam!==""){
             
-            addr = cmd.definition[global_commandparam].address;
-            type = cmd.definition[global_commandparam].type;
-            console.log("Querying param: "+cmd.definition[global_commandparam].name+"\n");
-            if (grouped_commandparam=="") {
-                grouped_commandparam=0;
+            addr = cmd.definition[globalCommandParam].address
+            type = cmd.definition[globalCommandParam].type
+            logger.log("Querying param: "+cmd.definition[globalCommandParam].name+"\n")
+            if (groupedCommandParam==="") {
+                groupedCommandParam=0
             }
         }
         
         //join queries
         
-        //let nrlen=bymem[grouped_commandparam].length+bymem[grouped_commandparam][bymem[grouped_commandparam].length-1]['type'];
-        //listval.toString(16).padStart(4,'0');
+        //let nrlen=bymem[grouped_commandparam].length+bymem[grouped_commandparam][bymem[grouped_commandparam].length-1]['type']
+        //listval.toString(16).padStart(4,'0')
 
-        let reqlen='0001'; //modbus defines 16bytes, some complex data are stored on multiple registers
+        let reqLength='0001' //modbus defines 16bytes, some complex data are stored on multiple registers
         if (Number.isInteger(type)){
-            reqlen=type.toString(16).padStart(4,'0');
+            reqLength=type.toString(16).padStart(4,'0')
         }
             
-        command=command.replace('{PARAM}',addr+reqlen);
+        command=command.replace('{PARAM}',addr+reqLength)
 
         
         //HANDLE set command...    
-        let setparam="";
-        let setparamind=0;
-        let setval="";
-        let setvalind=0;
+        let setParam=""
+        let setParaMind=0
+        let setVal=""
+        let setValInd=0
 
         //get args and connected data
-        let i=0;
-        myargs.forEach(function(el) {
+        let i=0
+        myArgs.forEach(function(el) {
 
             if ( command.indexOf('{ARGP'+i+'}')!==-1) {
-                setparamind=i;
-                setparam=cmd.definition.find(o => o.num === el );
+                setParaMind=i
+                setParam=cmd.definition.find(o => o.num === el )
             }
 
             if ( command.indexOf('{ARGV'+i+'}')!==-1) {
-                setvalind=i;
-                setval=el;
+                setValInd=i
+                setVal=el
             }
 
-            i++;
-        });
+            i++
+        })
 
-        //console.log(setparam);
-        //console.log(setval);
+        //logger.log(setparam)
+        //logger.log(setval)
 
-        if (setparam!="" && setval!="") {
+        if (setParam!=="" && setVal!=="") {
 
-            if ( command.indexOf('{ARGP'+setparamind+'}')!==-1) {
+            if ( command.indexOf('{ARGP'+setParaMind+'}')!==-1) {
 
                 //default 1 register            
-                let reglen="0001";
-                if (Number.isInteger(setparam.type)) {
-                    reglen=setparam.type.toString(16).padStart(4,'0');
-                    console.log("Error: Not supported type:", setparam.type);
-                    exit(-1);
+                let regLength="0001"
+                if (Number.isInteger(setParam.type)) {
+                    regLength=setParam.type.toString(16).padStart(4,'0')
+                    logger.log("Error: Not supported type:", setParam.type)
+                    exit(-1)
                 }    
 
-                let specargparam=setparam.address+reglen;
-                command=command.replace('{ARGP'+setparamind+'}',specargparam);
+                let specargParam=setParam.address+regLength
+                command=command.replace('{ARGP'+setParaMind+'}',specargParam)
                 
             }
 
-            if ( command.indexOf('{ARGV'+setvalind+'}')!==-1) {
+            if ( command.indexOf('{ARGV'+setValInd+'}')!==-1) {
                 //default 2 bytes
-                let deflen='02';
-                let rv='0000';
+                let defLength='02'
+                let rv='0000'
 
-                if (Array.isArray(setparam.unit)) {
-                    let listval=setparam.unit.indexOf(setval);
-                    if (listval===-1){
-                        console.log("Error: The requested value is not valid, values:", setparam.unit);
-                        exit(-1);
+                if (Array.isArray(setParam.unit)) {
+                    let listValue=setParam.unit.indexOf(setVal)
+                    if (listValue===-1){
+                        logger.log("Error: The requested value is not valid, values:", setParam.unit)
+                        exit(-1)
                     }
-                    if (Number.isInteger(listval)){
+                    if (Number.isInteger(listValue)){
                         
-                        rv=listval.toString(16).padStart(4,'0');
+                        rv=listValue.toString(16).padStart(4,'0')
                     }else{
-                        console.log("Error: The requested value is not compatible with the parameter type ("+setparam.type+")!");
-                        exit(-1);
+                        logger.log("Error: The requested value is not compatible with the parameter type ("+setParam.type+")!")
+                        exit(-1)
                     }
                     
                 }else{
 
-                    switch (setparam.type) {
+                    switch (setParam.type) {
                         case "UInt16BE":
                         case "Int16BE":
-                            if (setval.match(/^[0-9\.]+$/) ){
-                                if (parseInt(setval).toString() === setval){
-                                    setval=parseInt(setval);    
+                            if (setVal.match(/^[0-9\.]+$/) ){
+                                if (parseInt(setVal).toString() === setVal){
+                                    setVal=parseInt(setVal)
                                 }
                             }else{
-                                console.log(setparam);
-                                console.log("Error: The requested value ("+setval+") is not compatible with the parameter type!");
-                                exit(-1);
+                                logger.log(setParam)
+                                logger.log("Error: The requested value ("+setVal+") is not compatible with the parameter type!")
+                                exit(-1)
                             }
                             
-                            setval=Math.round(setval/setparam.rate);
-                            rv=setval.toString(16).padStart(4,'0');
+                            setVal=Math.round(setVal/setParam.rate)
+                            rv=setVal.toString(16).padStart(4,'0')
 
-                        break;
+                        break
                         default:
-                            console.log(setparam);
-                            console.log("Error: The requested parameter is not writable now!");
-                            exit(-1);
+                            logger.log(setParam)
+                            logger.log("Error: The requested parameter is not writable now!")
+                            exit(-1)
                     }
                 }
 
-                //console.log(rv);
+                //logger.log(rv)
                 
-                let specargval=deflen+rv;
-                //console.log("replace:",specargval);
+                let specArgValue=defLength+rv
+                //logger.log("replace:",specArgValue)
                 
-                command=command.replace('{ARGV'+setvalind+'}',specargval);
+                command=command.replace('{ARGV'+setValInd+'}',specArgValue)
                 
             }
             
         }
         
-        let matches=command.match(/\{LEN\}[a-f0-9A-F]{4}(.+)\{CRC\}$/);
-        let inner="";
+        let matches=command.match(/\{LEN\}[a-f0-9A-F]{4}(.+)\{CRC\}$/)
+        let inner=""
         if (matches) {
             //{CRC} -> 5 char vs 4char hex(2 byte): -1
-            inner=Buffer.from(matches[1],'hex');
+            inner=Buffer.from(matches[1],'hex')
         }
 
-        let crc=crc16modbus(inner);
+        let crc=crc16modbus(inner)
         
-        crc=crc.toString(16).padStart(4,'0');
+        crc=crc.toString(16).padStart(4,'0')
         
-        command=command.replace("{CRC}",crc.substring(2)+crc.substring(0,2));
+        command=command.replace("{CRC}",crc.substring(2)+crc.substring(0,2))
 
-        if (setparam!="" && setval!="") {
-            console.log("Constructed modbus RTU command:"+command);
-            //console.log("Dry run exiting here....");
-            //exit(0);
+        if (setParam!=="" && setVal!=="") {
+            logger.log("Constructed modbus RTU command:"+command)
+            //logger.log("Dry run exiting here....")
+            //exit(0)
         }    
             
-        return command;
+        return command
 
     }
 
@@ -693,20 +708,33 @@ function runscript(args) {
         const table = [
             0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401,
             0xA001, 0x6C00, 0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400
-        ];
+        ]
         
-        let crc = 0xFFFF;
+        let crc = 0xFFFF
 
         for (let i = 0; i < data.length; i++) {
-            let ch = data[i];
-            crc = table[(ch ^ crc) & 15] ^ (crc >> 4);
-            crc = table[((ch >> 4) ^ crc) & 15] ^ (crc >> 4);
+            let ch = data[i]
+            crc = table[(ch ^ crc) & 15] ^ (crc >> 4)
+            crc = table[((ch >> 4) ^ crc) & 15] ^ (crc >> 4)
         }
 
-        return crc;
+        return crc
         
     }
 
 }
 
-runscript(process.argv);
+function generateFileName() {
+    const now = new Date()
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, '0') // Add 1 to month because months are zero-indexed
+    const day = String(now.getDate()).padStart(2, '0')
+    const hours = String(now.getHours()).padStart(2, '0')
+    const minutes = String(now.getMinutes()).padStart(2, '0')
+    const seconds = String(now.getSeconds()).padStart(2, '0')
+    return `${year}-${month}-${day}_${hours}-${minutes}-${seconds}_log.txt`
+}
+
+runScript(process.argv)
+
+
